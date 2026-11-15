@@ -1,0 +1,12 @@
+# Cloned app (it's public; just document the clone command in the README)
+juice-shop/
+
+# Secrets
+.env
+*.key
+*.cer
+
+# Scanner/tool output
+.scannerwork/
+zap-home/
+2026-*-ZAP-Report-*/
