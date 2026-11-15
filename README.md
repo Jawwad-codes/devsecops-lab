@@ -1,6 +1,6 @@
 # DevSecOps Security Lab: SAST, DAST and SCA on OWASP Juice Shop
 
-A hands-on lab that runs three kinds of security testing against one intentionally vulnerable application, [OWASP Juice Shop](https://github.com/juice-shop/juice-shop), entirely in Docker on a local Linux machine (CachyOS).
+This lab brings together three kinds of security testing using [OWASP Juice Shop](https://github.com/juice-shop/juice-shop), an application built to be intentionally vulnerable. Everything runs in Docker on a local CachyOS machine.
 
 | Practice | Tool | What it tests |
 |---|---|---|
@@ -8,7 +8,7 @@ A hands-on lab that runs three kinds of security testing against one intentional
 | DAST (Dynamic Application Security Testing) | OWASP ZAP | The running application, from outside |
 | SCA (Software Composition Analysis) | Trivy | Dependencies, container images and config |
 
-Trivy also does container, secret and IaC scanning, so it is not only an SCA tool.
+Trivy can also scan container images, secrets, and infrastructure-as-code (IaC), so its role here goes beyond dependency analysis.
 
 ## Lab architecture
 
@@ -20,9 +20,9 @@ Source code -> SonarQube (SAST) -> Trivy fs (SCA) -> Docker image build
 ## Environment
 
 - OS: CachyOS (Arch-based) with Docker
-- All containers share one Docker network, `devsecops-lab`, so they reach each other by name (`sonarqube`, `juice-shop`)
-- Containers running in the lab: `sonarqube` (port 9000), `juice-shop` (port 3000), ZAP via Webswing (host port 8081)
-- DefectDojo is also running on the host (port 8080) for later report import
+- The containers share a Docker network called `devsecops-lab`, which lets them reach each other by name (`sonarqube`, `juice-shop`).
+- SonarQube runs on port 9000, Juice Shop on port 3000, and ZAP's Webswing interface on host port 8081.
+- DefectDojo is running on the host at port 8080 for importing reports later.
 
 ```bash
 docker network create devsecops-lab
@@ -36,7 +36,7 @@ docker network create devsecops-lab
 docker run -d --name sonarqube --network devsecops-lab -p 9000:9000 sonarqube:community
 ```
 
-Open `http://localhost:9000`, log in (`admin` / `admin`, then change the password), create a project named `juice-shop` and generate a project token.
+Open `http://localhost:9000` and sign in with `admin` / `admin`. Change the default password, create a project named `juice-shop`, and generate a project token.
 
 ### Start Juice Shop
 
@@ -46,19 +46,19 @@ docker run -d --name juice-shop --network devsecops-lab -p 3000:3000 bkimminich/
 
 ### Get the source code
 
-A normal clone failed with a network error (`curl 92 HTTP/2 stream reset`, `early EOF`), because the repo is large (about 160k objects). A shallow clone fixed it, and full history is not needed since SCM analysis is disabled in Sonar:
+A regular clone failed with `curl 92 HTTP/2 stream reset` and `early EOF`; the repository is large, with about 160k objects. A shallow clone worked. Since SCM analysis is disabled in SonarQube, the full Git history isn't needed:
 
 ```bash
 git clone --depth 1 https://github.com/juice-shop/juice-shop.git
 ```
 
-Other options if it fails again: `git config --global http.version HTTP/1.1`, or download the ZIP of the master branch.
+If the clone fails again, try `git config --global http.version HTTP/1.1` or download the ZIP of the master branch.
 
 ## 2. SAST with SonarQube
 
 ### Scanner configuration
 
-Settings live in `sonar-project.properties` in the project root, so the Docker command stays short:
+The scanner reads its settings from `sonar-project.properties` in the project root. That keeps the Docker command focused on running the scan:
 
 ```properties
 sonar.projectKey=juice-shop
@@ -83,7 +83,7 @@ docker run --rm \
   -Dsonar.qualitygate.wait=true
 ```
 
-What each part does:
+Here's what the main options do:
 
 | Option | Purpose |
 |---|---|
@@ -95,7 +95,7 @@ What each part does:
 | `sonar-scanner-cli:11` | Pinned scanner version for repeatable results |
 | `sonar.qualitygate.wait=true` | Wait for the quality gate and exit non-zero if it fails (useful in CI) |
 
-### Problems hit and how they were fixed
+### Issues encountered
 
 | Error | Cause | Fix |
 |---|---|---|
@@ -104,7 +104,7 @@ What each part does:
 
 ### Results (scan of 2026-11-15)
 
-Project `juice-shop` at `http://localhost:9000`, scanned with the `sonar-project.properties` above (1,690 files preprocessed, 10 languages detected).
+I scanned the `juice-shop` project at `http://localhost:9000` with the configuration above. SonarQube processed 1,690 files and detected 10 languages.
 
 | Metric | Result |
 |---|---|
@@ -118,13 +118,13 @@ Project `juice-shop` at `http://localhost:9000`, scanned with the `sonar-project
 | Duplications | 7.7% |
 | Total on the Issues page | 337 |
 
-Severity filter on the Issues page: Blocker 104, High 48, Medium 146, Low 78, Info 0. In MQR mode an issue is counted under every software quality it affects, so the per-quality and per-severity counts do not add up to 337.
+The Issues page showed 104 Blocker, 48 High, 146 Medium, 78 Low, and 0 Info issues. In MQR mode, one issue can count against more than one software quality, so the severity and quality totals won't necessarily add up to the 337 issues shown overall.
 
-The quality gate passed even though blocker issues exist. I had expected it to fail. My guess is that the default gate only judges new code, which would let a first scan pass; check the gate conditions and the New Code setting before relying on it as a CI gate.
+The quality gate passed despite the blocker issues, which surprised me. One possible explanation is that the default gate checks only new code, so a first scan may still pass. Before using this as a CI gate, verify the gate conditions and the project's New Code setting.
 
-The SonarQube project dashboard visually confirmed the passed quality gate and the issue, coverage, and duplication metrics above. The Juice Shop storefront was also open at `http://localhost:3000/`, confirming the application was running locally during testing.
+The dashboard screenshot shows the passed gate and the issue, coverage, and duplication metrics above. I also opened the Juice Shop storefront at `http://localhost:3000/` to confirm it was running locally.
 
-**Task 1:** find at least three security findings and explain why SonarQube reported them.
+**Task 1: SonarQube findings.** I looked for at least three security findings and noted why SonarQube flagged them.
 
 | # | Finding | Location | Why it was reported |
 |---|---|---|---|
@@ -132,11 +132,11 @@ The SonarQube project dashboard visually confirmed the passed quality gate and t
 | 2 | Same rule | `frontend/src/app/administration/administration.component.ts`, lines 74 and 92 | Same reason, two more places in one file |
 | 3 | Same rule | `frontend/src/app/data-export/data-export.component.ts` (line not captured) | Same reason |
 
-All three are the same rule at different locations. To cover more ground, filter the Issues page by Security and add findings from other rules. Juice Shop is deliberately vulnerable, so these are likely intended XSS challenge code; in a real app you would check whether the value can be influenced by a user.
+All three findings come from the same rule, in different parts of the code. To get a broader view, filter the Issues page by Security and look for findings from other rules too. Juice Shop is intentionally vulnerable, so these may be part of its XSS challenges. In a real application, I'd trace each value to see whether a user could control it.
 
 ## 3. SCA with Trivy
 
-Commands from the lab guide, run from the `juice-shop` folder:
+Run these commands from the `juice-shop` folder:
 
 ```bash
 # Full filesystem scan
@@ -152,10 +152,10 @@ docker run --rm -v "$PWD:/work" -w /work aquasec/trivy:latest \
   fs --scanners vuln -f json -o trivy-report.json .
 ```
 
-For each finding note: package name, installed version, fixed version, CVE ID and severity.
+For each finding, record the package, installed and fixed versions, CVE ID, and severity.
 
-**Interview question:** what is the difference between SAST and SCA?
-SAST checks your own source code for security issues. SCA checks third-party dependencies for known vulnerabilities.
+**Interview question: What's the difference between SAST and SCA?**
+SAST looks for security issues in your own source code. SCA checks third-party dependencies for known vulnerabilities.
 
 Status: _fill in results and the date you ran it._
 
@@ -175,11 +175,11 @@ docker run --rm --network devsecops-lab -v "$PWD:/zap/wrk/:rw" \
   zap-full-scan.py -t http://juice-shop:3000 -r zap-full-report.html
 ```
 
-Only run active scans against your own lab app or systems you have explicit permission to test.
+Run active scans only against your own lab application or systems you have explicit permission to test.
 
 ### Running ZAP with its GUI in the browser
 
-To watch the spider, alerts and scan progress live, the ZAP desktop UI was run through Webswing:
+I ran ZAP's desktop interface through Webswing so I could watch the spider, alerts, and scan progress:
 
 ```bash
 docker run --rm -u zap \
@@ -190,13 +190,13 @@ docker run --rm -u zap \
   zap-webswing.sh
 ```
 
-Open `http://localhost:8081/zap/`. Port 8081 is used because 8080 is taken by DefectDojo. The target must be `http://juice-shop:3000`, not `localhost`, since `localhost` inside the ZAP container means ZAP itself.
+Open `http://localhost:8081/zap/`. I used port 8081 because DefectDojo already uses 8080. In ZAP, set the target to `http://juice-shop:3000`, not `localhost`: inside the ZAP container, `localhost` points back to ZAP itself.
 
 ### Problem: only GET requests were scanned
 
-Reasons: the spider only follows links, Juice Shop is an Angular single-page app whose login, basket and feedback calls are JavaScript REST requests, and nothing behind login is reachable unauthenticated.
+This happened because the standard spider follows links, while Juice Shop is an Angular single-page app. Its login, basket, and feedback actions use JavaScript REST calls, and unauthenticated scans can't reach pages behind login.
 
-What was done / recommended:
+To reach more of the application:
 
 1. Enable the AJAX spider with a headless browser.
 2. Use **Manual Explore**: launch the browser from ZAP, then register, log in, add basket items, send feedback and check out so ZAP records the POST/PUT/DELETE calls.
@@ -212,7 +212,7 @@ What was done / recommended:
 | `docker cp` said file not found | The named file had not been generated yet | List `/home/zap` first with `docker exec <container> ls -lt /home/zap` |
 | HTML opens with no styling | The Modern template loads CSS/JS from an assets folder, and the HTML references it by exact name. ZAP adds a number to that name when older folders exist, so this report pointed at `2026-11-15-ZAP-Report-4/`, not `2026-11-15-ZAP-Report-` | Find the name with `grep -o 'href="[^"]*"' <report>.html`, then copy that exact folder next to the HTML |
 
-Getting the report out of the container (the container was started with `--rm`, so copy before stopping it):
+The container was started with `--rm`, so copy the report files out before stopping it:
 
 ```bash
 docker exec <container> ls -lt /home/zap
@@ -222,27 +222,27 @@ docker cp <container>:/home/zap/2026-11-15-ZAP-Report-.html ./
 docker cp <container>:/home/zap/2026-11-15-ZAP-Report- ./
 ```
 
-Do not rename the HTML file; it looks for its assets folder by name, and that name can carry a number suffix. Our report referenced `2026-11-15-ZAP-Report-4/`, so that was the folder that had to sit next to the HTML:
+Keep the HTML filename unchanged: it looks for an assets folder with a matching name, which may include a number suffix. This report referenced `2026-11-15-ZAP-Report-4/`, so that exact folder needs to sit beside the HTML file:
 
 ```bash
 docker cp <container>:/home/zap/2026-11-15-ZAP-Report-4 ./
 ```
 
-Make sure both are in the same directory.
+Keep the HTML file and its assets folder in the same directory.
 
-For a single self-contained file, generate again with **Report > Generate Report**, choose **Traditional HTML Report** as the template, set Report Name to `zap-full-report` and Report Directory to `/home/zap/`, then:
+To create a single self-contained HTML file, use **Report > Generate Report**, choose **Traditional HTML Report**, set the report name to `zap-full-report` and the report directory to `/home/zap/`, then run:
 
 ```bash
 docker cp <container>:/home/zap/zap-full-report.html ./
 ```
 
-For DefectDojo import, also generate a **Traditional XML Report** or JSON report.
+For DefectDojo, generate a **Traditional XML Report** or a JSON report as well.
 
-Status: the report was generated in the container, copied to the host with its assets folder, and opens with styling.
+The report was generated in the container and copied to the host with its assets folder. It opens with the styling intact.
 
 ### Results (active scan, report generated 2026-11-15 12:51 UTC)
 
-Target `http://juice-shop:3000`, ZAP 2.17.0, active scan completed at 100% after 2,581 requests. Nine alerts:
+I scanned `http://juice-shop:3000` with ZAP 2.17.0. The active scan reached 100% after 2,581 requests and reported nine alerts:
 
 | Risk | Alert | Instances |
 |---|---|---|
@@ -256,11 +256,11 @@ Target `http://juice-shop:3000`, ZAP 2.17.0, active scan completed at 100% after
 | Low | X-Content-Type-Options Header Missing | 3 |
 | Info | Modern Web Application | Systemic |
 
-Scan statistics from the report: 124 endpoints found, 99% of them `GET`, 54% of responses were 4xx (mostly the active scan's malformed payloads), 2% were 5xx. The 99% `GET` figure confirms the earlier problem: the authenticated and `POST`/`PUT` API surface (login, basket, orders) was barely covered. Log in, use the app through the ZAP browser and rescan to test those endpoints.
+The report lists 124 endpoints. Of the requests, 99% were `GET`; 54% of responses were 4xx (mostly malformed payloads from the active scan), and 2% were 5xx. That high `GET` share confirms the scan barely reached authenticated routes or the `POST`/`PUT` APIs for login, baskets, and orders. To cover those paths, log in through ZAP's browser, use the app, and scan again.
 
-The ZAP Webswing UI showed the active scan at 100% after 2,581 requests. The generated report provides the completed alert summary below; the UI's **New Alerts** count is for alerts added during that scan, not the total number of alerts in the report.
+The Webswing screenshot shows the scan at 100% after 2,581 requests. The table below summarizes the finished report. ZAP's **New Alerts** counter shows alerts added during that scan, so it may differ from the report's total.
 
-**Task 2:** identify three ZAP alerts and understand their risk, evidence and remediation.
+**Task 2: ZAP findings.** I chose three alerts and recorded their risk, evidence, and suggested remediation.
 
 | # | Alert | Risk | Evidence | Remediation |
 |---|---|---|---|---|
@@ -268,20 +268,42 @@ The ZAP Webswing UI showed the active scan at 100% after 2,581 requests. The gen
 | 2 | Content Security Policy (CSP) Header Not Set | Medium | No `Content-Security-Policy` header on `http://juice-shop:3000` and other pages (flagged systemic). CWE-693 | Configure the web server or application to send a CSP header, which limits where scripts and other content may load from and reduces XSS impact |
 | 3 | Cross-Domain Misconfiguration | Medium | `Access-Control-Allow-Origin: *` on `/`, `/robots.txt`, `/sitemap.xml`, `/styles.css` and the favicon. CWE-264 | Restrict the header to the specific origins that need it, or remove CORS headers so the browser enforces the Same Origin Policy |
 
-Other alerts, briefly:
+The remaining alerts:
 
 - **Session ID in URL Rewrite (Medium):** the Socket.IO `sid` value travels in the query string (CWE-598). Session IDs in URLs can leak through the Referer header, browser history and server logs; use a cookie instead.
 - **Missing Anti-clickjacking Header (Medium):** a `POST /socket.io/` response had no `X-Frame-Options` or CSP `frame-ancestors`. Set one of them.
 - **Private IP Disclosure (Low):** `/rest/admin/application-configuration` returns internal addresses such as `192.168.99.100:3000`. That request carried no cookie or auth header and still returned `200` with the whole application configuration, which is worth investigating as an access-control problem.
 - **Timestamp Disclosure - Unix (Low):** Unix timestamps in the configuration and product search responses. Low risk; confirm they are not sensitive.
 - **X-Content-Type-Options Header Missing (Low):** Socket.IO responses lack `nosniff`.
-- **Manual observation (no alert):** `robots.txt` lists `Disallow: /ftp`, and `/ftp` serves a directory listing, including backup and key-store file names. ZAP did not raise it, but the captured response shows it.
+- **Manual observation (no alert):** `robots.txt` lists `Disallow: /ftp`, and `/ftp` shows a directory listing with backup and key-store filenames. ZAP didn't flag this, but it appears in the captured response.
 
-### What each tool caught
+### What the tools found
 
-- **SAST (SonarQube)** flagged risky patterns in the Angular frontend code, such as sanitization bypasses, without running the app.
-- **DAST (ZAP)** found a runtime SQL injection and missing or permissive HTTP headers, which the source scan cannot see.
-- **SCA (Trivy)** covers vulnerable dependencies, which neither tool above does. It has not been run yet.
+- **SAST (SonarQube)** flagged risky patterns in the Angular frontend, including sanitization bypasses, without running the application.
+- **DAST (ZAP)** found a SQL injection at runtime and missing or permissive HTTP headers, issues a source-only scan can't observe.
+- **SCA (Trivy)** checks dependencies for known vulnerabilities, an area the other two tools don't cover. I haven't run it yet.
+
+## Screenshots
+
+### SonarQube dashboard
+
+![The SonarQube dashboard shows the passed quality gate and project metrics](screenshots/Screenshot_20261115_191304.png)
+
+### SonarQube issues
+
+![SonarQube lists findings about Angular sanitization](screenshots/Screenshot_20261115_191233.png)
+
+### Juice Shop running locally
+
+![The OWASP Juice Shop storefront open locally](screenshots/Screenshot_20261115_191458.png)
+
+### ZAP active scan
+
+![The ZAP active scan reached 100 percent after 2,581 requests](screenshots/Screenshot_20261115_191613.png)
+
+### ZAP report
+
+![The generated ZAP by Checkmarx scanning report](screenshots/Screenshot_20261115_191659.png)
 
 ## 5. Expected outputs
 
