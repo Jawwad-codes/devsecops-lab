@@ -106,13 +106,6 @@ What each part does:
 
 Open `http://localhost:9000` and check the `juice-shop` project: security vulnerabilities, security hotspots, bugs, code smells and the quality gate. Juice Shop is intentionally vulnerable, so a failing quality gate is expected.
 
-**Task 1:** find at least three security findings and explain why SonarQube reported them.
-
-| # | Finding | File | Why it was reported |
-|---|---|---|---|
-| 1 | | | |
-| 2 | | | |
-| 3 | | | |
 
 ## 3. SCA with Trivy
 
@@ -214,13 +207,6 @@ For DefectDojo import, also generate a **Traditional XML Report** or JSON report
 
 Status: the ZAP report was generated inside the container, and a styled copy on the host was still being sorted out at the time of writing.
 
-**Task 2:** identify three ZAP alerts and understand their risk, evidence and remediation.
-
-| # | Alert | Risk | Evidence | Remediation |
-|---|---|---|---|---|
-| 1 | | | | |
-| 2 | | | | |
-| 3 | | | | |
 
 ## 5. Expected outputs
 
