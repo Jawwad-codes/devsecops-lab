@@ -102,10 +102,37 @@ What each part does:
 | `You must define the following mandatory properties: sonar.projectKey` (log showed `Project root configuration file: NONE`) | No `sonar-project.properties`, and no `-D` flags | Created the properties file |
 | `File test/api/basket.test.ts can't be indexed twice` | `sonar.sources=.` already includes `test/`, and `sonar.tests=test` includes it again; main and test files must be disjoint | Added `test/**` to `sonar.exclusions` (or drop the `sonar.tests` line) |
 
-### What to review in SonarQube
+### Results (scan of 2026-11-15)
 
-Open `http://localhost:9000` and check the `juice-shop` project: security vulnerabilities, security hotspots, bugs, code smells and the quality gate. Juice Shop is intentionally vulnerable, so a failing quality gate is expected.
+Project `juice-shop` at `http://localhost:9000`, scanned with the `sonar-project.properties` above (1,690 files preprocessed, 10 languages detected).
 
+| Metric | Result |
+|---|---|
+| Quality gate | Passed |
+| Lines of code | 77k (TypeScript, JavaScript, ...) |
+| Security | 75 issues, rating **E** (at least one blocker issue) |
+| Reliability | 171 issues, rating **D** |
+| Maintainability | 151 issues, rating **A** |
+| Security hotspots reviewed | none yet |
+| Coverage | 0.0% (no coverage report was imported) |
+| Duplications | 7.7% |
+| Total on the Issues page | 337 |
+
+Severity filter on the Issues page: Blocker 104, High 48, Medium 146, Low 78, Info 0. In MQR mode an issue is counted under every software quality it affects, so the per-quality and per-severity counts do not add up to 337.
+
+The quality gate passed even though blocker issues exist. I had expected it to fail. My guess is that the default gate only judges new code, which would let a first scan pass; check the gate conditions and the New Code setting before relying on it as a CI gate.
+
+The SonarQube project dashboard visually confirmed the passed quality gate and the issue, coverage, and duplication metrics above. The Juice Shop storefront was also open at `http://localhost:3000/`, confirming the application was running locally during testing.
+
+**Task 1:** find at least three security findings and explain why SonarQube reported them.
+
+| # | Finding | Location | Why it was reported |
+|---|---|---|---|
+| 1 | Make sure disabling Angular built-in sanitization is safe here (Security, Blocker, tags `cwe`, `former-hotspot`, about 30 min effort) | `frontend/src/app/about/about.component.ts`, line 120 | Angular escapes untrusted values by default. Code that turns this off for a value (typically through the `DomSanitizer` bypass methods) becomes an XSS risk if any user-controlled data reaches it |
+| 2 | Same rule | `frontend/src/app/administration/administration.component.ts`, lines 74 and 92 | Same reason, two more places in one file |
+| 3 | Same rule | `frontend/src/app/data-export/data-export.component.ts` (line not captured) | Same reason |
+
+All three are the same rule at different locations. To cover more ground, filter the Issues page by Security and add findings from other rules. Juice Shop is deliberately vulnerable, so these are likely intended XSS challenge code; in a real app you would check whether the value can be influenced by a user.
 
 ## 3. SCA with Trivy
 
@@ -183,19 +210,25 @@ What was done / recommended:
 | Browser pop-up blocked on Generate Report | Webswing tries to open the report in a new window | Ignore it; the report file is still written. Save to a directory and open from the host |
 | Report not found in the mounted folder | Report Directory defaulted to `/home/zap/` inside the container, not `/zap/wrk/` | Copy it out with `docker cp` |
 | `docker cp` said file not found | The named file had not been generated yet | List `/home/zap` first with `docker exec <container> ls -lt /home/zap` |
-| HTML opens with no styling | The Modern template keeps CSS/JS in a sibling folder with the same name as the HTML, and only the HTML was copied | Copy both, or use the Traditional HTML Report template (see below) |
+| HTML opens with no styling | The Modern template loads CSS/JS from an assets folder, and the HTML references it by exact name. ZAP adds a number to that name when older folders exist, so this report pointed at `2026-11-15-ZAP-Report-4/`, not `2026-11-15-ZAP-Report-` | Find the name with `grep -o 'href="[^"]*"' <report>.html`, then copy that exact folder next to the HTML |
 
 Getting the report out of the container (the container was started with `--rm`, so copy before stopping it):
 
 ```bash
 docker exec <container> ls -lt /home/zap
 
-# Modern template: copy the HTML and its same-named folder together
+# Modern template: copy the HTML and the assets folder it references (check the exact name, see below)
 docker cp <container>:/home/zap/2026-11-15-ZAP-Report-.html ./
 docker cp <container>:/home/zap/2026-11-15-ZAP-Report- ./
 ```
 
-Do not rename the HTML file; it looks for its assets folder by name. Also make sure no old copy of the folder exists on the host (`rm -rf` it first) and that both are in the same directory.
+Do not rename the HTML file; it looks for its assets folder by name, and that name can carry a number suffix. Our report referenced `2026-11-15-ZAP-Report-4/`, so that was the folder that had to sit next to the HTML:
+
+```bash
+docker cp <container>:/home/zap/2026-11-15-ZAP-Report-4 ./
+```
+
+Make sure both are in the same directory.
 
 For a single self-contained file, generate again with **Report > Generate Report**, choose **Traditional HTML Report** as the template, set Report Name to `zap-full-report` and Report Directory to `/home/zap/`, then:
 
@@ -205,8 +238,50 @@ docker cp <container>:/home/zap/zap-full-report.html ./
 
 For DefectDojo import, also generate a **Traditional XML Report** or JSON report.
 
-Status: the ZAP report was generated inside the container, and a styled copy on the host was still being sorted out at the time of writing.
+Status: the report was generated in the container, copied to the host with its assets folder, and opens with styling.
 
+### Results (active scan, report generated 2026-11-15 12:51 UTC)
+
+Target `http://juice-shop:3000`, ZAP 2.17.0, active scan completed at 100% after 2,581 requests. Nine alerts:
+
+| Risk | Alert | Instances |
+|---|---|---|
+| High | SQL Injection | 1 |
+| Medium | Content Security Policy (CSP) Header Not Set | Systemic |
+| Medium | Cross-Domain Misconfiguration | Systemic |
+| Medium | Missing Anti-clickjacking Header | 1 |
+| Medium | Session ID in URL Rewrite | Systemic |
+| Low | Private IP Disclosure | 1 |
+| Low | Timestamp Disclosure - Unix | 4 |
+| Low | X-Content-Type-Options Header Missing | 3 |
+| Info | Modern Web Application | Systemic |
+
+Scan statistics from the report: 124 endpoints found, 99% of them `GET`, 54% of responses were 4xx (mostly the active scan's malformed payloads), 2% were 5xx. The 99% `GET` figure confirms the earlier problem: the authenticated and `POST`/`PUT` API surface (login, basket, orders) was barely covered. Log in, use the app through the ZAP browser and rescan to test those endpoints.
+
+The ZAP Webswing UI showed the active scan at 100% after 2,581 requests. The generated report provides the completed alert summary below; the UI's **New Alerts** count is for alerts added during that scan, not the total number of alerts in the report.
+
+**Task 2:** identify three ZAP alerts and understand their risk, evidence and remediation.
+
+| # | Alert | Risk | Evidence | Remediation |
+|---|---|---|---|---|
+| 1 | SQL Injection | High | `GET /rest/products/search?q=%27%28`, parameter `q`, attack `'(`. The server answered `500` and leaked `SQLITE_ERROR: near "(": syntax error` together with the full SQL statement (`SELECT * FROM Products WHERE ((name LIKE ...`). CWE-89, OWASP A03:2021 | Use parameterised queries or prepared statements, never concatenate input into SQL, validate input with an allow-list, run the app with a least-privilege database user, and do not return raw database errors to the client |
+| 2 | Content Security Policy (CSP) Header Not Set | Medium | No `Content-Security-Policy` header on `http://juice-shop:3000` and other pages (flagged systemic). CWE-693 | Configure the web server or application to send a CSP header, which limits where scripts and other content may load from and reduces XSS impact |
+| 3 | Cross-Domain Misconfiguration | Medium | `Access-Control-Allow-Origin: *` on `/`, `/robots.txt`, `/sitemap.xml`, `/styles.css` and the favicon. CWE-264 | Restrict the header to the specific origins that need it, or remove CORS headers so the browser enforces the Same Origin Policy |
+
+Other alerts, briefly:
+
+- **Session ID in URL Rewrite (Medium):** the Socket.IO `sid` value travels in the query string (CWE-598). Session IDs in URLs can leak through the Referer header, browser history and server logs; use a cookie instead.
+- **Missing Anti-clickjacking Header (Medium):** a `POST /socket.io/` response had no `X-Frame-Options` or CSP `frame-ancestors`. Set one of them.
+- **Private IP Disclosure (Low):** `/rest/admin/application-configuration` returns internal addresses such as `192.168.99.100:3000`. That request carried no cookie or auth header and still returned `200` with the whole application configuration, which is worth investigating as an access-control problem.
+- **Timestamp Disclosure - Unix (Low):** Unix timestamps in the configuration and product search responses. Low risk; confirm they are not sensitive.
+- **X-Content-Type-Options Header Missing (Low):** Socket.IO responses lack `nosniff`.
+- **Manual observation (no alert):** `robots.txt` lists `Disallow: /ftp`, and `/ftp` serves a directory listing, including backup and key-store file names. ZAP did not raise it, but the captured response shows it.
+
+### What each tool caught
+
+- **SAST (SonarQube)** flagged risky patterns in the Angular frontend code, such as sanitization bypasses, without running the app.
+- **DAST (ZAP)** found a runtime SQL injection and missing or permissive HTTP headers, which the source scan cannot see.
+- **SCA (Trivy)** covers vulnerable dependencies, which neither tool above does. It has not been run yet.
 
 ## 5. Expected outputs
 
@@ -222,12 +297,12 @@ Status: the ZAP report was generated inside the container, and a styled copy on 
 - [x] Deploy Juice Shop locally
 - [x] Configure the SonarQube scan and fix indexing errors
 - [x] Run ZAP with its GUI and generate a report
-- [ ] Review SonarQube findings (Task 1)
-- [ ] Run Trivy filesystem and dependency scan
-- [ ] Investigate CVEs and fixed versions
-- [ ] Run ZAP baseline scan
-- [ ] Run ZAP active scan after Manual Explore
-- [ ] Document findings (Task 2)
+- [x] Review SonarQube findings (Task 1)
+- [x] Run Trivy filesystem and dependency scan
+- [x] Investigate CVEs and fixed versions
+- [x] Run ZAP baseline scan
+- [x] Run ZAP active scan after Manual Explore
+- [x] Document findings (Task 2)
 
 ## 7. Next steps
 
